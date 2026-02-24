@@ -1,0 +1,79 @@
+
+#include <opencv2/opencv.hpp>
+#include <iostream>
+#include <string>
+
+using namespace cv;
+using namespace std;
+
+int main() {
+    setlocale(LC_ALL, "Russian");
+
+    string imagePath = "cat.jpg";
+    Mat originalImage = imread(imagePath);
+
+    if (originalImage.empty()) {
+        cout << "Ошибка: Не удалось загрузить изображение!" << endl;
+        return -1;
+    }
+
+
+    namedWindow("Исходное изображение", WINDOW_NORMAL);
+    imshow("Исходное изображение", originalImage );
+
+
+    Mat grayImage;
+    cvtColor(originalImage, grayImage, COLOR_BGR2GRAY);
+    namedWindow("Градации серого", WINDOW_NORMAL);
+    imshow("Градации серого", grayImage);
+
+
+    Mat resizedImage;
+    resize(originalImage, resizedImage, Size(originalImage.cols / 2, originalImage.rows / 2));
+    namedWindow("Изменение размера", WINDOW_NORMAL);
+    imshow("Изменение размера", resizedImage);
+
+
+    Mat rotatedImage;
+    Point2f center(originalImage.cols / 2.0, originalImage.rows / 2.0);
+    Mat rotationMatrix = getRotationMatrix2D(center, 45.0, 1.0);
+    warpAffine(originalImage, rotatedImage, rotationMatrix, originalImage.size());
+    namedWindow("Поворот на 45°", WINDOW_NORMAL);
+    imshow("Поворот на 45°", rotatedImage);
+
+
+    Mat blurredImage;
+    GaussianBlur(originalImage, blurredImage, Size(15, 15), 0);
+    namedWindow("Размытие Gaussian", WINDOW_NORMAL);
+    imshow("Размытие Gaussian", blurredImage);
+
+
+    Mat edges;
+
+    Mat grayForEdges;
+    cvtColor(originalImage, grayForEdges, COLOR_BGR2GRAY);
+    Canny(grayForEdges, edges, 50, 150);
+    namedWindow("Границы Canny", WINDOW_NORMAL);
+    imshow("Границы Canny", edges);
+
+
+    imwrite("gray_image.jpg", grayImage);
+    imwrite("edges_image.jpg", edges);
+    imwrite("blurred_image.jpg", blurredImage);
+
+    cout << "Изображения сохранены:" << endl;
+    cout << "- gray_image.jpg" << endl;
+    cout << "- edges_image.jpg" << endl;
+    cout << "- blurred_image.jpg" << endl;
+
+
+    cout << "\nНажмите любую клавишу для выхода..." << endl;
+    waitKey(0);
+
+
+    destroyAllWindows();
+
+    return 0;
+}
+ 
+
