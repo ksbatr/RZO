@@ -1,0 +1,92 @@
+﻿#include <opencv2/opencv.hpp>
+#include <iostream>
+#include <vector>
+#include <cstdlib>
+#include <ctime>
+
+using namespace cv;
+using namespace std;
+
+int main() {
+    setlocale(LC_ALL, "Russian");
+
+    // Белый холст
+    Mat canvas(600, 800, CV_8UC3, Scalar(255, 255, 255));
+
+    // Линия 
+    line(canvas, Point(100, 100), Point(300, 100), Scalar(255, 0, 0), 3);
+
+    // Прямоугольник 
+    rectangle(canvas, Point(350, 100), Point(550, 200), Scalar(0, 255, 0), 2);
+
+    // Окружность 
+    circle(canvas, Point(200, 300), 80, Scalar(0, 0, 255), -1);
+
+    // Эллипс 
+    ellipse(canvas, Point(500, 350), Size(100, 50), 0, 0, 360, Scalar(0, 255, 255), 2);
+
+    // Многоугольник 
+    vector<Point> polygon;
+    polygon.push_back(Point(200, 450));
+    polygon.push_back(Point(300, 400));
+    polygon.push_back(Point(400, 450));
+    polygon.push_back(Point(400, 550));
+    polygon.push_back(Point(300, 600));
+    polygon.push_back(Point(200, 550));
+
+    vector<vector<Point>> contours;
+    contours.push_back(polygon);
+    polylines(canvas, contours, true, Scalar(255, 0, 255), 3);
+
+    putText(canvas, "22-PM-1, Batrakova K.",
+        Point(400, 580),
+        FONT_HERSHEY_SIMPLEX,
+        0.8,
+        Scalar(0, 0, 0),
+        2);
+    imwrite("figures.jpg", canvas);
+
+    // Анимация 
+    srand(time(NULL));
+    string text = "22-PM-1, Batrakova K.";
+    int x = 100, y = 50;
+    int dx = 5, dy = 3;
+
+    namedWindow("figures", WINDOW_NORMAL);
+
+    while (true) {
+        Mat frame = canvas.clone();
+
+        
+        putText(frame, "22-PM-1, Batrakova K.",
+            Point(x, y),
+            FONT_HERSHEY_DUPLEX,
+            1.2,
+            Scalar(0, 0, 0),
+            2);
+
+        imshow("figures", frame);
+
+        x += dx;
+        y += dy;
+
+        
+        if (x <= 0 || x >= 700) dx = -dx;
+        if (y <= 30 || y >= 550) dy = -dy;
+
+        
+        if (rand() % 100 < 5) {
+            dx = (rand() % 7) - 3;
+            dy = (rand() % 7) - 3;
+            if (dx == 0) dx = 2;
+            if (dy == 0) dy = 2;
+        }
+
+        int key = waitKey(30);
+        if (key == 27) break; 
+    }
+
+    imwrite("figures.jpg", canvas);
+    destroyAllWindows();
+    return 0;
+}
