@@ -1,0 +1,54 @@
+﻿#include <opencv2/opencv.hpp>
+#include <iostream>
+
+using namespace cv;
+using namespace std;
+
+int main() {
+    Mat img = imread("3.jpg");
+
+    Mat result = img.clone();
+
+    Mat hsv;
+    cvtColor(img, hsv, COLOR_BGR2HSV);
+    //imshow("HSV Image", hsv);
+    Mat mask;
+
+    inRange(hsv, Scalar(160, 80, 60), Scalar(180, 255, 255), mask);
+   
+    // СИНИЙ
+    //inRange(hsv, Scalar(82, 100, 100), Scalar(135, 255, 255), mask);
+
+    // ЗЕЛЕНЫЙ
+    //inRange(hsv, Scalar(35, 70, 60), Scalar(85, 255, 255), mask);
+
+    // ЖЕЛТЫЙ
+    //inRange(hsv, Scalar(15, 70, 100), Scalar(35, 255, 255), mask);
+
+    Mat kernel = getStructuringElement(MORPH_ELLIPSE, Size(5, 5));
+    morphologyEx(mask, mask, MORPH_OPEN, kernel);
+    morphologyEx(mask, mask, MORPH_CLOSE, kernel);
+
+    imshow("Red", mask);
+
+    vector<vector<Point>> contours;
+    findContours(mask, contours, RETR_EXTERNAL, CHAIN_APPROX_SIMPLE);
+
+    for (const auto& contour : contours) {
+        double area = contourArea(contour);
+        if (area > 500) {
+            Rect bbox = boundingRect(contour);
+
+            rectangle(result, bbox, Scalar(0, 0, 255), 3);
+
+            putText(result, "",
+                Point(bbox.x, bbox.y - 10),
+                FONT_HERSHEY_SIMPLEX, 0.7, Scalar(0, 0, 255), 2);
+        }
+    }
+
+    imshow("Original with marker", result);
+
+    waitKey(0);
+    return 0;
+}
