@@ -1,0 +1,223 @@
+﻿
+#include <opencv2/opencv.hpp>
+#include <iostream>
+#include <string>
+#include <vector>
+#include <clocale>
+#include <algorithm>
+#include <cmath>
+
+using namespace cv;
+using namespace std;
+
+// Функция для вычисления угла между тремя точками
+double angleBetween(const Point& a, const Point& b, const Point& c) {
+    Point ba = a - b;
+    Point bc = c - b;
+    double dot = ba.x * bc.x + ba.y * bc.y;
+    double mag = sqrt(ba.x * ba.x + ba.y * ba.y) * sqrt(bc.x * bc.x + bc.y * bc.y);
+    if (mag == 0) return 0;
+    double angle = acos(dot / mag) * 180.0 / CV_PI;
+    return angle;
+}
+
+// Функция для определения типа фигуры
+string getShapeName(const vector<Point>& contour, const vector<Point>& approx) {
+    int vertices = static_cast<int>(approx.size());
+
+    // Вычисляем площадь и периметр для дополнительных проверок
+    double area = contourArea(contour);
+    double perimeter = arcLength(contour, true);
+    double circularity = 4 * CV_PI * area / (perimeter * perimeter);
+
+    if (vertices >= 8) {
+        if (circularity > 0.85) {
+            RotatedRect rect = minAreaRect(contour);
+            double aspectRatio = min(rect.size.width, rect.size.height) /
+                max(rect.size.width, rect.size.height);
+
+            if (aspectRatio > 0.85) {
+                return "Krug";  
+            }
+            else {
+                return "Oval";  
+            }
+        }
+        else {
+            return "Mnogougolnik"; 
+        }
+    }
+   
+    else if (vertices == 3) {
+        return "Treugolnik";
+    }
+    
+    else if (vertices == 4) {
+        
+        Rect rect = boundingRect(approx);
+        double width = rect.width;
+        double height = rect.height;
+        double aspectRatio = width / height;
+
+       
+        vector<double> sides;
+        for (int i = 0; i < 4; i++) {
+            double side = norm(approx[i] - approx[(i + 1) % 4]);
+            sides.push_back(side);
+        }
+
+        
+        double diag1 = norm(approx[0] - approx[2]);
+        double diag2 = norm(approx[1] - approx[3]);
+
+        
+        double maxSide = *max_element(sides.begin(), sides.end());
+        double minSide = *min_element(sides.begin(), sides.end());
+        bool equalSides = (maxSide - minSide) / maxSide < 0.1; 
+
+        
+        bool allAngles90 = true;
+        for (int i = 0; i < 4; i++) {
+            double angle = angleBetween(approx[(i + 3) % 4], approx[i], approx[(i + 1) % 4]);
+            if (abs(angle - 90) > 15) {  
+                allAngles90 = false;
+                break;
+            }
+        }
+
+
+        bool isRhombus = false;
+        if (equalSides && !allAngles90) {
+         
+            if (diag1 > 0 && diag2 > 0) {
+                double side = (sides[0] + sides[1] + sides[2] + sides[3]) / 4;
+                if (abs(diag1 * diag1 + diag2 * diag2 - 4 * side * side) < 100) {
+                    isRhombus = true;
+                }
+            }
+        }
+
+     
+        if (allAngles90) {
+            if (abs(aspectRatio - 1.0) < 0.1) {
+                return "Kvadrat";  
+            }
+            else {
+                return "Pramoyg";  
+            }
+        }
+        
+        else if (isRhombus) {
+            return "Romb";  
+        }
+        else {
+            return "4";  // Четырехугольник
+        }
+    }
+    // Пятиугольник
+    else if (vertices == 5) {
+        return "5";
+    }
+    // Шестиугольник
+    else if (vertices == 6) {
+        return "6";
+    }
+    else {
+        return "Mnogougolnik";
+    }
+}
+
+int main() {
+    setlocale(LC_ALL, "Russian");
+
+    Mat img = imread("4.png");
+    if (img.empty()) {
+        cout << "Ошибка: не удалось загрузить изображение 4.png!" << endl;
+        cout << "Проверьте, что файл находится в правильной папке." << endl;
+
+        
+        system("dir *.png");
+
+        return -1;
+    }
+
+    Mat result = img.clone();
+    Mat gray, edges;
+    cvtColor(img, gray, COLOR_BGR2GRAY);
+    GaussianBlur(gray, gray, Size(5, 5), 0);
+    Canny(gray, edges, 50, 150);
+
+    Mat kernel = getStructuringElement(MORPH_RECT, Size(3, 3));
+    morphologyEx(edges, edges, MORPH_CLOSE, kernel);
+
+    vector<vector<Point>> contours;
+    vector<Vec4i> hierarchy;
+    findContours(edges, contours, hierarchy, RETR_EXTERNAL, CHAIN_APPROX_SIMPLE);
+
+    cout << "Найдено контуров: " << contours.size() << endl;
+    cout << "----------------------------------------" << endl;
+
+    for (size_t i = 0; i < contours.size(); i++) {
+        double area = contourArea(contours[i]);
+        if (area < 500) continue;
+
+        double perimeter = arcLength(contours[i], true);
+        vector<Point> approx;
+        approxPolyDP(contours[i], approx, 0.02 * perimeter, true);
+
+        string shapeName = getShapeName(contours[i], approx);
+
+        
+        double circularity = 4 * CV_PI * area / (perimeter * perimeter);
+
+        Moments m = moments(contours[i]);
+        if (m.m00 != 0) {
+            Point2f center(static_cast<float>(m.m10 / m.m00),
+                static_cast<float>(m.m01 / m.m00));
+
+            
+            drawContours(result, vector<vector<Point>>{contours[i]}, -1, Scalar(0, 255, 0), 2);
+
+            
+            circle(result, center, 5, Scalar(0, 0, 255), -1);
+
+           
+            string label = shapeName;
+
+            int fontFace = FONT_HERSHEY_SIMPLEX;
+            double fontScale = 0.6;
+            int thickness = 2;
+
+            int baseline;
+            Size textSize = getTextSize(label, fontFace, fontScale, thickness, &baseline);
+            Point textPos(static_cast<int>(center.x - textSize.width / 2),
+                static_cast<int>(center.y - 15));
+
+            rectangle(result,
+                Rect(textPos.x - 5, textPos.y - textSize.height - 5,
+                    textSize.width + 10, textSize.height + baseline + 10),
+                Scalar(255, 255, 255), -1);
+
+            putText(result, label, textPos, fontFace, fontScale, Scalar(0, 0, 255), thickness);
+
+           
+            cout << "Фигура " << i + 1 << ": " << shapeName << endl;
+            cout << "  Вершин: " << approx.size() << endl;
+            cout << "  Площадь: " << area << endl;
+            cout << "  Периметр: " << perimeter << endl;
+            cout << "  Циркулярность: " << circularity << " (1.0 = идеальный круг)" << endl;
+            cout << "  Центр: (" << center.x << ", " << center.y << ")" << endl;
+            cout << "----------------------------------------" << endl;
+        }
+    }
+
+   
+    imshow("Original", img);
+    imshow("Result", result);
+
+   
+   
+
+    waitKey(0);
+    return 0;
+}
