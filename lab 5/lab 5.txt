@@ -1,0 +1,199 @@
+﻿#include <opencv2/opencv.hpp>
+#include <iostream>
+#include <string>
+#include <vector>
+
+using namespace cv;
+using namespace std;
+
+#include <map>
+
+struct TrackedShape {
+    int id;
+    string shape;        
+    Point center;
+    Rect bbox;
+    int life;
+};
+
+vector<TrackedShape> trackedShapes;
+int nextId = 0;
+
+int CANNY_THRESHOLD1 = 20;    
+int CANNY_THRESHOLD2 = 40;     
+double APPROX_EPSILON = 0.03;  
+
+double SQUARE_ASPECT_MIN = 0.7;
+double SQUARE_ASPECT_MAX = 1.2;
+double SQUARE_FILL_RATIO = 0.3;
+
+double CIRCLE_CIRCULARITY = 0.8;
+
+double MIN_AREA = 20;
+double MAX_AREA = 50000;
+
+double TRIANGLE_MIN_AREA = 20;        
+double TRIANGLE_MAX_ANGLE = 130;     
+
+
+string detectShape(const vector<Point>& contour) {
+    double perimeter = arcLength(contour, true);
+    if (perimeter < 1) return "UNKNOWN";
+
+    vector<Point> approx;
+    approxPolyDP(contour, approx, APPROX_EPSILON * perimeter, true);
+
+    int vertices = (int)approx.size();
+    double area = contourArea(contour);
+    Rect rect = boundingRect(contour);
+    double aspectRatio = (double)rect.width / rect.height;
+    double rectArea = rect.width * rect.height;
+    double fillRatio = area / rectArea;
+
+    if (vertices >= 6) {
+        double circularity = 4 * CV_PI * area / (perimeter * perimeter);
+        if (circularity > CIRCLE_CIRCULARITY) {
+            return "CIRCLE";
+        }
+    }
+
+    if (vertices == 4) {
+        if (aspectRatio > SQUARE_ASPECT_MIN && aspectRatio < SQUARE_ASPECT_MAX && fillRatio > SQUARE_FILL_RATIO) {
+            return "SQUARE";
+        }
+        return "UNKNOWN";
+    }
+
+
+    if (vertices == 3 && area > TRIANGLE_MIN_AREA) {
+        return "TRIANGLE";
+    }
+
+    return "UNKNOWN";
+}
+
+void fixShape(vector<TrackedShape>& currentShapes, int framesToLive) {
+
+    for (auto& t : trackedShapes) {
+        t.life--;
+    }
+
+    trackedShapes.erase(
+        remove_if(trackedShapes.begin(), trackedShapes.end(),
+            [](const TrackedShape& t) { return t.life <= 0; }),
+        trackedShapes.end()
+    );
+
+    for (auto& curr : currentShapes) {
+        bool found = false;
+
+        for (auto& track : trackedShapes) {
+            double dist = norm(track.center - curr.center);
+            if (dist < 30) {
+                track.center = curr.center;
+                track.bbox = curr.bbox;
+                track.life = framesToLive;
+                found = true;
+                break;
+            }
+        }
+
+        if (!found) {
+            TrackedShape newTrack;
+            newTrack.id = nextId++;
+            newTrack.shape = curr.shape;     
+            newTrack.center = curr.center;
+            newTrack.bbox = curr.bbox;
+            newTrack.life = framesToLive;
+            trackedShapes.push_back(newTrack);
+        }
+    }
+}
+
+int main() {
+    VideoCapture cap("Motion abstract geometric shapes.mkv");
+
+    if (!cap.isOpened()) {
+        cout << "Ошибка открытия видео!" << endl;
+        return -1;
+    }
+
+    Mat frame, gray, edges, result;
+
+    while (true) {
+        cap >> frame;
+        if (frame.empty()) break;
+
+        cvtColor(frame, gray, COLOR_BGR2GRAY);
+        GaussianBlur(gray, gray, Size(5, 5), 2);
+        Canny(gray, edges, CANNY_THRESHOLD1, CANNY_THRESHOLD2);
+
+        vector<vector<Point>> contours;
+        vector<Vec4i> hierarchy;
+        findContours(edges, contours, hierarchy, RETR_TREE, CHAIN_APPROX_SIMPLE);
+
+        result = frame.clone();
+
+        vector<TrackedShape> currentShapes;
+
+        for (size_t i = 0; i < contours.size(); i++) {
+            if (hierarchy[i][3] != -1) continue;
+
+            double area = contourArea(contours[i]);
+            if (area < MIN_AREA || area > MAX_AREA) continue;
+
+            string shape = detectShape(contours[i]);
+            if (shape != "UNKNOWN") {
+                Rect bbox = boundingRect(contours[i]);
+                Moments m = moments(contours[i]);
+                if (m.m00 != 0) {
+                    TrackedShape s;
+                    s.shape = shape;
+                    s.center = Point((int)(m.m10 / m.m00), (int)(m.m01 / m.m00));
+                    s.bbox = bbox;
+                    currentShapes.push_back(s);
+                }
+            }
+        }
+
+        fixShape(currentShapes, 90);
+
+        for (auto& track : trackedShapes) {
+            Scalar color;
+            if (track.shape == "TRIANGLE") color = Scalar(0, 0, 255);
+            else if (track.shape == "SQUARE") color = Scalar(0, 255, 0);
+            else color = Scalar(255, 0, 0);
+
+            rectangle(result, track.bbox, color, 2);
+            circle(result, track.center, 4, color, -1);
+            putText(result, track.shape, Point(track.center.x - 45, track.center.y - 10),
+                FONT_HERSHEY_SIMPLEX, 0.5, color, 2);
+        }
+
+        imshow("Shape Detection", result);
+        imshow("Edges", edges);
+
+        char key = waitKey(30);
+        if (key == 27) break;
+
+        if (key == '1') { CANNY_THRESHOLD1 += 5; cout << "Canny1 = " << CANNY_THRESHOLD1 << endl; }
+        if (key == '2') { CANNY_THRESHOLD1 -= 5; cout << "Canny1 = " << CANNY_THRESHOLD1 << endl; }
+        if (key == '3') { CANNY_THRESHOLD2 += 10; cout << "Canny2 = " << CANNY_THRESHOLD2 << endl; }
+        if (key == '4') { CANNY_THRESHOLD2 -= 10; cout << "Canny2 = " << CANNY_THRESHOLD2 << endl; }
+        if (key == '5') { APPROX_EPSILON += 0.005; cout << "Epsilon = " << APPROX_EPSILON << endl; }
+        if (key == '6') { APPROX_EPSILON -= 0.005; cout << "Epsilon = " << APPROX_EPSILON << endl; }
+        if (key == '7') { SQUARE_ASPECT_MIN += 0.05; cout << "Aspect min = " << SQUARE_ASPECT_MIN << endl; }
+        if (key == '8') { SQUARE_ASPECT_MIN -= 0.05; cout << "Aspect min = " << SQUARE_ASPECT_MIN << endl; }
+        if (key == '9') { SQUARE_FILL_RATIO += 0.05; cout << "Fill ratio = " << SQUARE_FILL_RATIO << endl; }
+        if (key == '0') { SQUARE_FILL_RATIO -= 0.05; cout << "Fill ratio = " << SQUARE_FILL_RATIO << endl; }
+        if (key == 'q') { CIRCLE_CIRCULARITY += 0.05; cout << "Circularity = " << CIRCLE_CIRCULARITY << endl; }
+        if (key == 'w') { CIRCLE_CIRCULARITY -= 0.05; cout << "Circularity = " << CIRCLE_CIRCULARITY << endl; }
+        if (key == 'a') { MIN_AREA += 10; cout << "Min area = " << MIN_AREA << endl; }
+        if (key == 's') { MIN_AREA -= 10; if (MIN_AREA < 10) MIN_AREA = 10; cout << "Min area = " << MIN_AREA << endl; }
+    }
+
+    cap.release();
+    destroyAllWindows();
+
+    return 0;
+}
