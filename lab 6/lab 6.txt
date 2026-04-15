@@ -1,0 +1,197 @@
+﻿#include <opencv2/opencv.hpp>
+#include <iostream>
+#include <vector>
+#include <algorithm>
+
+int main() {
+    setlocale(LC_ALL, "Russian");
+
+    cv::CascadeClassifier faceCascade;
+    cv::CascadeClassifier eyeCascade;
+    cv::CascadeClassifier smileCascade;
+
+    if (!faceCascade.load("haarcascade_frontalface_default.xml")) {
+        std::cerr << "Ошибка загрузки каскада лиц\n";
+        return -1;
+    }
+    if (!eyeCascade.load("haarcascade_eye.xml")) {
+        std::cerr << "Ошибка загрузки каскада глаз\n";
+        return -1;
+    }
+    if (!smileCascade.load("haarcascade_smile.xml")) {
+        std::cerr << "Ошибка загрузки каскада улыбок\n";
+        return -1;
+    }
+
+    cv::VideoCapture cap("ZUA.mp4");
+    if (!cap.isOpened()) {
+        std::cerr << "Ошибка открытия видеофайла\n";
+        return -1;
+    }
+
+    double fps = cap.get(cv::CAP_PROP_FPS);
+    int delay = (fps > 0) ? cvRound(1000.0 / fps) : 33;
+
+    cv::Mat frame, gray;
+    std::vector<cv::Rect> faces, eyes, smiles;
+    bool paused = false;
+
+    while (true) {
+        if (!paused) {
+            cap.read(frame);
+            if (frame.empty()) break;
+        }
+
+        cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
+        cv::equalizeHist(gray, gray);
+
+        faceCascade.detectMultiScale(gray, faces, 1.15, 5, 0, cv::Size(60, 60));
+
+        for (const auto& faceRect : faces) {
+            cv::Point faceCenter(faceRect.x + faceRect.width / 2, faceRect.y + faceRect.height / 2);
+
+            cv::rectangle(frame, faceRect, cv::Scalar(0, 255, 0), 2);
+            cv::putText(frame, "FACE", cv::Point(faceRect.x, faceRect.y - 10),
+                cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 255, 0), 1);
+
+            cv::Mat faceROI = gray(faceRect);
+
+            eyes.clear();
+            eyeCascade.detectMultiScale(faceROI, eyes, 1.05, 3, 0, cv::Size(15, 15));
+
+            std::vector<cv::Rect> validEyes;
+            for (const auto& eyeRect : eyes) {
+                if (eyeRect.y + eyeRect.height < faceRect.height * 0.6 && eyeRect.y > faceRect.height * 0.1) {
+                    validEyes.push_back(eyeRect);
+                }
+            }
+
+            std::vector<cv::Point> eyeCenters;
+            std::vector<cv::Rect> filteredEyes;
+
+            for (const auto& eyeRect : validEyes) {
+                cv::Point eyeCenter(eyeRect.x + eyeRect.width / 2, eyeRect.y + eyeRect.height / 2);
+
+                bool duplicate = false;
+                for (const auto& existing : eyeCenters) {
+                    if (cv::norm(eyeCenter - existing) < faceRect.width * 0.1) {
+                        duplicate = true;
+                        break;
+                    }
+                }
+
+                if (!duplicate) {
+                    eyeCenters.push_back(eyeCenter);
+                    filteredEyes.push_back(eyeRect);
+                }
+            }
+
+            if (filteredEyes.size() > 2) {
+                std::sort(filteredEyes.begin(), filteredEyes.end(),
+                    [](const cv::Rect& a, const cv::Rect& b) { return a.area() > b.area(); });
+                filteredEyes.resize(2);
+            }
+
+            cv::Rect leftEye, rightEye;
+            bool hasLeft = false, hasRight = false;
+
+            if (filteredEyes.size() == 1) {
+                cv::Point eyeCenter(filteredEyes[0].x + filteredEyes[0].width / 2,
+                    filteredEyes[0].y + filteredEyes[0].height / 2);
+                if (eyeCenter.x < faceRect.width / 2) {
+                    leftEye = filteredEyes[0];
+                    hasLeft = true;
+                }
+                else {
+                    rightEye = filteredEyes[0];
+                    hasRight = true;
+                }
+            }
+            else if (filteredEyes.size() == 2) {
+                cv::Point eye1Center(filteredEyes[0].x + filteredEyes[0].width / 2,
+                    filteredEyes[0].y + filteredEyes[0].height / 2);
+                cv::Point eye2Center(filteredEyes[1].x + filteredEyes[1].width / 2,
+                    filteredEyes[1].y + filteredEyes[1].height / 2);
+
+                if (eye1Center.x < eye2Center.x) {
+                    leftEye = filteredEyes[0];
+                    rightEye = filteredEyes[1];
+                }
+                else {
+                    leftEye = filteredEyes[1];
+                    rightEye = filteredEyes[0];
+                }
+                hasLeft = hasRight = true;
+            }
+
+            if (hasLeft) {
+                cv::Point center(faceRect.x + leftEye.x + leftEye.width / 2,
+                    faceRect.y + leftEye.y + leftEye.height / 2);
+                int radius = cvRound((leftEye.width + leftEye.height) * 0.2);
+                cv::circle(frame, center, radius, cv::Scalar(255, 0, 0), 2);
+                cv::circle(frame, center, 2, cv::Scalar(255, 255, 255), -1);
+                cv::putText(frame, "L", cv::Point(center.x - 15, center.y - radius - 5),
+                    cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar(255, 0, 0), 1);
+            }
+
+            if (hasRight) {
+                cv::Point center(faceRect.x + rightEye.x + rightEye.width / 2,
+                    faceRect.y + rightEye.y + rightEye.height / 2);
+                int radius = cvRound((rightEye.width + rightEye.height) * 0.2);
+                cv::circle(frame, center, radius, cv::Scalar(0, 0, 255), 2);
+                cv::circle(frame, center, 2, cv::Scalar(255, 255, 255), -1);
+                cv::putText(frame, "R", cv::Point(center.x + 5, center.y - radius - 5),
+                    cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar(0, 0, 255), 1);
+            }
+
+            smiles.clear();
+            cv::Rect mouthROI(faceRect.width * 0.15, faceRect.height * 0.6,
+                faceRect.width * 0.7, faceRect.height * 0.35);
+
+            if (mouthROI.x >= 0 && mouthROI.y >= 0 &&
+                mouthROI.x + mouthROI.width <= faceRect.width &&
+                mouthROI.y + mouthROI.height <= faceRect.height) {
+
+                cv::Mat smileROI = faceROI(mouthROI);
+                smileCascade.detectMultiScale(smileROI, smiles, 1.1, 15, 0, cv::Size(30, 20));
+
+                if (!smiles.empty()) {
+                    const auto& smileRect = smiles[0];
+                    cv::Rect fullSmileRect(faceRect.x + mouthROI.x + smileRect.x,
+                        faceRect.y + mouthROI.y + smileRect.y,
+                        smileRect.width, smileRect.height);
+                    cv::Point center(fullSmileRect.x + fullSmileRect.width / 2,
+                        fullSmileRect.y + fullSmileRect.height / 3);
+                    cv::Size axes(fullSmileRect.width / 2, fullSmileRect.height / 2);
+                    cv::ellipse(frame, center, axes, 0, 0, 180, cv::Scalar(0, 255, 255), 3);
+                    cv::putText(frame, "SMILE", cv::Point(fullSmileRect.x, fullSmileRect.y - 5),
+                        cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 255, 255), 1);
+                }
+            }
+        }
+
+        std::string info = "Faces: " + std::to_string(faces.size());
+        cv::putText(frame, info, cv::Point(10, 30), cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(255, 255, 255), 2);
+
+        if (paused) {
+            cv::putText(frame, "PAUSED", cv::Point(10, 60), cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(0, 0, 255), 2);
+        }
+
+        cv::imshow("Face Detection", frame);
+
+        char key = cv::waitKey(delay);
+        if (key == 27) break;
+        if (key == 32) {
+            paused = !paused;
+            std::cout << (paused ? "Пауза\n" : "Продолжение\n");
+        }
+        if (key == 's' || key == 'S') {
+            cv::imwrite("screenshot.png", frame);
+            std::cout << "Скриншот сохранен\n";
+        }
+    }
+
+    cap.release();
+    cv::destroyAllWindows();
+    return 0;
+}
